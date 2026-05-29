@@ -69,9 +69,11 @@ authRoutes.post(
         .status(201)
         .json({ message: "User registered successfully", userId: user.id });
     } catch (error) {
-      throw createError(ERROR_CODES.INTERNAL_ERROR, "Registration failed", {
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
+      throw createError(
+        ERROR_CODES.INTERNAL_ERROR,
+        error instanceof Error ? error.message : "Unknown error",
+        { error: "Registration failed" },
+      );
     }
   },
 );
@@ -97,11 +99,9 @@ authRoutes.post(
     const { phone_number } = req.body;
 
     if (!phone_number) {
-      throw createError(
-        ERROR_CODES.MISSING_FIELD,
-        "phone_number is required",
-        { error: "Missing required fields" },
-      );
+      throw createError(ERROR_CODES.MISSING_FIELD, "phone_number is required", {
+        error: "Missing required fields",
+      });
     }
 
     // Use the phone number as the lockout identifier.
@@ -116,11 +116,11 @@ authRoutes.post(
           `Your account is temporarily locked. ` +
             `Please try again in ${lockoutStatus.minutesRemaining} minute${lockoutStatus.minutesRemaining === 1 ? "" : "s"}.`,
           {
-              unlocksAt: lockoutStatus.unlocksAt,
-              minutesRemaining: lockoutStatus.minutesRemaining,
-              error: "ACCOUNT_LOCKED",
-            },
-          );
+            unlocksAt: lockoutStatus.unlocksAt,
+            minutesRemaining: lockoutStatus.minutesRemaining,
+            error: "ACCOUNT_LOCKED",
+          },
+        );
       }
 
       // ── 2. Attempt authentication ─────────────────────────────────────────────
@@ -434,7 +434,6 @@ authRoutes.get(
         },
       });
     } catch (error) {
-     
       throw createError(
         ERROR_CODES.INTERNAL_ERROR,
         error instanceof Error ? error.message : "Unknown error",

@@ -21,6 +21,7 @@ import { checkAccountStatusStrict } from "../../middleware/checkAccountStatus";
 import { geolocateMiddleware } from "../../middleware/geolocate";
 import { createExportRoutes } from "../export";
 
+
 export const transactionRoutesV1 = Router();
 transactionRoutesV1.use(createExportRoutes());
 
