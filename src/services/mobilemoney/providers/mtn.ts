@@ -151,12 +151,14 @@ export class MTNProvider {
   }
 
   /**
-   * MTN B2B Batch Payout - Process up to 50 payouts in a single API call.
-   * This provides significant performance gains for high-volume payout operations.
+   * MTN B2B Batch Payout - Process up to 100 payouts in a single API call.
+   * Sends the batch then polls the MTN batch status endpoint until items
+   * reach a terminal state or a timeout is reached. Individual item
+   * failures are returned so callers can resolve them independently.
    */
   async sendBatchPayout(items: BatchPayoutItem[], requestId?: string): Promise<{ success: boolean; results: BatchPayoutResult[]; error?: unknown }> {
     const log = requestId ? logger.child({ requestId }) : logger;
-    const MAX_BATCH_SIZE = 50;
+    const MAX_BATCH_SIZE = 100;
     
     if (items.length === 0) {
       return { success: true, results: [] };
@@ -180,7 +182,7 @@ export class MTNProvider {
     try {
       const token = await this.getAccessToken();
       const batchReference = `BATCH-${randomUUID()}`;
-      
+
       // MTN disbursement batch API endpoint
       const response = await axios.post(
         `${this.baseUrl}/disbursement/v2_0/batch-payout`,
@@ -208,13 +210,71 @@ export class MTNProvider {
 
       const duration = Date.now() - startTime;
 
-      // Process partial success response
-      const responseItems = response.data?.items ?? [];
+      // If API provided immediate per-item results, use them. Otherwise poll.
+      let responseItems = response.data?.items ?? [];
+      const providedBatchId = response.data?.batchReference || response.data?.batchId || batchReference;
+
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Ocp-Apim-Subscription-Key": this.subscriptionKey,
+        "X-Target-Environment": this.environment,
+      };
+
+      // Poll for status if items are missing or in pending state
+      const needsPolling = responseItems.length === 0 || responseItems.some((ri: any) => {
+        const s = String(ri.status ?? "").toUpperCase();
+        return s === "PENDING" || s === "IN_PROGRESS" || s === "PROCESSING";
+      });
+
+      if (needsPolling) {
+        const pollUrls = [
+          `${this.baseUrl}/disbursement/v2_0/batch-payout/${encodeURIComponent(providedBatchId)}`,
+          `${this.baseUrl}/disbursement/v2_0/batch-payout/status/${encodeURIComponent(providedBatchId)}`,
+          `${this.baseUrl}/disbursement/v2_0/batch-payouts/${encodeURIComponent(providedBatchId)}`,
+        ];
+
+        const maxAttempts = 10;
+        const delayMs = 1000;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          try {
+            let statusResp: any = null;
+            for (const url of pollUrls) {
+              try {
+                statusResp = await axios.get(url, { headers });
+                if (statusResp?.data) break;
+              } catch (e) {
+                // try next candidate
+              }
+            }
+
+            if (!statusResp?.data) {
+              await new Promise(r => setTimeout(r, delayMs));
+              continue;
+            }
+
+            responseItems = statusResp.data.items ?? statusResp.data?.results ?? responseItems;
+
+            const allFinal = responseItems.every((ri: any) => {
+              const s = String(ri.status ?? "").toUpperCase();
+              return s === "SUCCESSFUL" || s === "SUCCESS" || s === "FAILED" || s === "ERROR";
+            });
+
+            if (allFinal) break;
+          } catch (pollErr) {
+            // swallow and retry
+          }
+
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      }
+
+      // Build results for caller
       const results: BatchPayoutResult[] = items.map(item => {
         const responseItem = responseItems.find(
-          (r: { referenceId: string }) => r.referenceId === item.referenceId
+          (r: { referenceId: string }) => String(r.referenceId) === String(item.referenceId)
         );
-        
+
         if (!responseItem) {
           return {
             referenceId: item.referenceId,
@@ -227,10 +287,10 @@ export class MTNProvider {
         return {
           referenceId: item.referenceId,
           success: status === "SUCCESSFUL" || status === "SUCCESS",
-          error: status !== "SUCCESSFUL" && status !== "SUCCESS" 
+          error: status !== "SUCCESSFUL" && status !== "SUCCESS"
             ? responseItem.errorReason || responseItem.message || `Status: ${status}`
             : undefined,
-          providerReference: responseItem.financialTransactionId || responseItem.transactionId,
+          providerReference: responseItem.financialTransactionId || responseItem.transactionId || responseItem.transaction_id,
         };
       });
 
@@ -241,7 +301,7 @@ export class MTNProvider {
         duration, 
         successCount, 
         failureCount,
-        batchReference 
+        batchReference: providedBatchId,
       }, "MTN: Batch payout completed");
 
       return {
