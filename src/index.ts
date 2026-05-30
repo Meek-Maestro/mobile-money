@@ -90,6 +90,7 @@ import reconciliationRoutes from "./routes/reconciliation";
 import exchangeRateBufferRoutes from "./routes/exchangeRateBuffers";
 import adminAssetRoutes from "./routes/admin/assets";
 import settingsRoutes from "./routes/settings";
+import merchantWebhooksRouter from "./routes/merchantWebhooks";
 
 
 
@@ -379,6 +380,7 @@ app.use("/api/reconciliation", reconciliationRoutes);
 app.use("/api/exchange-rate-buffers", exchangeRateBufferRoutes);
 app.use("/api/admin/assets", adminAssetRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/merchant/webhooks", merchantWebhooksRouter);
 
 // Subscriptions management
 app.use("/api/subscriptions", subscriptionsRoutes);
