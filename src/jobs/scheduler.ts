@@ -33,6 +33,12 @@ interface JobConfig {
 
 const JOBS: JobConfig[] = [
   {
+    name: "sanction-sync",
+    // Daily at 1:00 AM - syncs internal sanction list with global lists
+    schedule: process.env.SANCTION_SYNC_CRON || "0 1 * * *",
+    handler: runSanctionSyncJob,
+  },
+  {
     name: "cleanup",
     // Daily at 2:00 AM - deletes old completed/failed transactions
     schedule: process.env.CLEANUP_CRON || "0 2 * * *",
